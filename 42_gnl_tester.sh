@@ -16,8 +16,6 @@
 
 QUIET=0
 DIR=""
-SCRIPT_NAME=$(basename "$0")
-
 for a in "$@"; do
 	case "$a" in
 		-q|--quiet) QUIET=1 ;;
@@ -38,7 +36,7 @@ M_OK=0; M_KO=0; M_WARN=0
 B_OK=0; B_KO=0; B_WARN=0
 
 gray() { printf '%s\n' "$1" | head -n "${2:-10}" | while IFS= read -r l; do printf '         %s↳ %s%s\n' "$GRAY" "$l" "$RST"; done; }
-ok()   { C_OK=$((C_OK+1)); }
+ok()   { C_OK=$((C_OK+1));     [ "$QUIET" -eq 1 ] || printf '  %s[ OK ]%s %s\n' "$GREEN" "$RST" "$1"; }
 ko()   { C_KO=$((C_KO+1));     printf '  %s[ KO ]%s %s\n' "$RED" "$RST" "$1"; [ -n "$2" ] && gray "$2" "${3:-10}"; }
 warn() { C_WARN=$((C_WARN+1)); printf '  %s[WARN]%s %s\n' "$YEL" "$RST" "$1"; [ -n "$2" ] && gray "$2" "${3:-10}"; }
 title(){ printf '\n%s━━━ %s ━━━%s\n' "$CYAN" "$1" "$RST"; }
@@ -73,6 +71,7 @@ BS_LIST="1 2 7 42 9999 10000000"
 BS_BONUS="1 42 9999"
 
 # ───────────────────────────── harnais C ────────────────────────────────────
+# Le harnais appelle TA get_next_line et compare chaque ligne avec getline()
 cat > "$T/harness.c" <<'EOF'
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -161,6 +160,7 @@ static void	mismatch(t_src *s, size_t n, const char *got)
 		printf("dernière ligne du fichier sans '\\n' : n'en ajoute pas\n");
 }
 
+/* un appel de get_next_line + comparaison avec getline */
 static int	step(t_src *s)
 {
 	ssize_t	n;
@@ -201,6 +201,7 @@ static int	step(t_src *s)
 	return (0);
 }
 
+/* après EOF, get_next_line doit continuer à renvoyer NULL */
 static int	eof_check(t_src *s)
 {
 	char	*got;
@@ -458,7 +459,7 @@ mkfixtures() {
 	head -c 20000 /dev/urandom > "$f/binary"
 }
 
-mkboundary() {
+mkboundary() { # $1 = BUFFER_SIZE : lignes de BS-1, BS, BS+1 caractères
 	local bs=$1 L
 	for L in $((bs-1)) "$bs" $((bs+1)); do
 		{ rep "$L" a; printf '\n'; rep "$L" b; printf '\n'; rep "$L" c; } > "$T/f/bd_${bs}_${L}_nonl"
@@ -486,7 +487,7 @@ desc() {
 		long_nl)       printf '%s' "ligne de 10 000 caractères + '\\n'" ;;
 		long_nonl)     printf '%s' "ligne de 10 000 caractères sans '\\n'" ;;
 		long_mix)      printf '%s' "lignes très courtes et très longues mélangées" ;;
-		lines300)      printf '%s' "300 lignes (1..300)" ;;
+		lines300)       printf '%s' "300 lignes (1..300)" ;;
 		many_short)    printf '%s' "1 000 lignes d'1 caractère" ;;
 		*)             printf '%s' "$1" ;;
 	esac
@@ -496,7 +497,7 @@ FILES_BASE="empty nl nl4 one_char one_char_nl one_line_nonl one_line_nl multi_nl
 FILES_HEAVY="lines300 many_short"
 
 # ───────────────────────────── compilation ──────────────────────────────────
-build() {
+build() { # $1=BS ("" = sans -D)  $2=binaire  $3=m|b
 	local bs=$1 out=$2 kind=$3 src f objs="" dflag="" log="$T/build.log"
 	[ -n "$bs" ] && dflag="-D BUFFER_SIZE=$bs"
 	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
@@ -509,7 +510,7 @@ build() {
 	return 0
 }
 
-build_mem() {
+build_mem() { # $1=BS $2=binaire $3=m|b
 	local bs=$1 out=$2 kind=$3 src s="" f
 	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
 	for f in $src; do s="$s $DIR/$f"; done
@@ -522,7 +523,7 @@ build_mem() {
 
 # ───────────────────────────── exécution d'un test ──────────────────────────
 HINT=""
-judge() {
+judge() { # label rc out
 	local label=$1 rc=$2 out=$3 msg=""
 	case $rc in
 		0)  ok "$label"; return ;;
@@ -543,20 +544,20 @@ judge() {
 	fi
 }
 
-run_case() {
+run_case() { # label bin args...   (STDIN_FILE, TL, SLOW, AS_WARN, MSG124 optionnels)
 	local label=$1 bin=$2 out rc
 	shift 2
 	{ out=$(tmo "${TL:-10}" "$bin" "$@" 2>&1 < "${STDIN_FILE:-/dev/null}"); rc=$?; } 2>/dev/null
 	judge "$label" "$rc" "$out"
 }
 
-run_pipe() {
+run_pipe() { # label bin fichier
 	local out rc
 	{ out=$(cat "$3" | tmo "${TL:-10}" "$2" stdin "$3" 2>&1); rc=$?; } 2>/dev/null
 	judge "$1" "$rc" "$out"
 }
 
-run_first() {
+run_first() { # label bin : get_next_line doit rendre la 1ère ligne sans attendre l'EOF
 	[ -z "$TIMEOUT_BIN" ] && return
 	local fifo="$T/fifo.$$" out rc wp
 	rm -f "$fifo"; mkfifo "$fifo" 2>/dev/null || return
@@ -565,15 +566,16 @@ run_first() {
 	{ out=$(tmo 3 "$2" first < "$fifo" 2>&1); rc=$?; } 2>/dev/null
 	{ kill "$wp"; wait "$wp"; } 2>/dev/null
 	rm -f "$fifo"
-	MSG124="Bloqué : get_next_line attend la fin du fichier (EOF) alors qu'une ligne complète est déjà arrivée. Il faut s'arrêter de lire dès qu'un '\\n' est dans le buffer." \
+	MSG124="Bloqué : get_next_line attend la fin du fichier (EOF) alors qu'une ligne complète est déjà arrivée. Il faut s'arrêter de lire dès qu'un '\\n' est dans le buffer (\"read le moins possible\")." \
 		judge "$1" "$rc" "$out"
 }
 
 # ───────────────────────────── suite par BUFFER_SIZE ───────────────────────
-suite_bs() {
+suite_bs() { # $1=m|b  $2=BS
 	local kind=$1 bs=$2 bin="$T/bin/h_$1_$2" fx L
 	HINT=""
 	[ "$bs" -ge 1000000 ] && HINT=" Avec BUFFER_SIZE=$bs, un 'char buf[BUFFER_SIZE + 1]' sur la pile dépasse la limite (~8 Mo) : alloue le buffer avec malloc."
+	printf '\n%s▸ BUFFER_SIZE=%s%s\n' "$BOLD" "$bs" "$RST"
 	if ! build "$bs" "$bin" "$kind"; then
 		ko "compilation avec -Wall -Wextra -Werror -D BUFFER_SIZE=$bs" "$(cat "$T/build.log")"
 		return
@@ -600,12 +602,13 @@ suite_bs() {
 	case "$bs" in 1|42|9999) run_first "s'arrête au 1er '\\n' (ne lit pas tout le fichier d'avance)" "$bin" ;; esac
 }
 
-suite_multi() {
+suite_multi() { # bonus : plusieurs fd en même temps
 	local bs bin F="$T/f"
 	for bs in $BS_BONUS; do
 		bin="$T/bin/h_b_$bs"
 		[ -x "$bin" ] || continue
 		HINT=""
+		printf '\n%s▸ multi-fd, BUFFER_SIZE=%s%s\n' "$BOLD" "$bs" "$RST"
 		run_case "3 fd alternés (fd A,B,C,A,B,C...)" "$bin" multi 0 "$F/multi_nl" "$F/multi_nonl" "$F/mix_empty"
 		run_case "3 fd de longueurs très différentes" "$bin" multi 0 "$F/lines300" "$F/long_mix" "$F/one_char"
 		run_case "4 fd dont un vide et un avec lignes vides au début" "$bin" multi 0 "$F/empty" "$F/nl_start" "$F/multi_nl" "$F/utf8"
@@ -617,7 +620,7 @@ suite_multi() {
 }
 
 # ───────────────────────────── analyse statique ────────────────────────────
-norm_check() {
+norm_check() { # fichiers...
 	if ! command -v norminette >/dev/null 2>&1; then
 		warn "norminette introuvable : norme non vérifiée" "Une erreur de norme (même sur les bonus) = 0. Lance norminette à la main."
 		return
@@ -629,12 +632,14 @@ norm_check() {
 	else ko "norminette : erreurs de norme (= 0 à l'évaluation)" "$bad" 12; fi
 }
 
-static_checks() {
+static_checks() { # $1=m|b  (nécessite les .o du build BS=42)
 	local kind=$1 src f o all_forb="" all_glob="" all_fs="" nstat=0 names="" und="" def="" sym
 	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
 	for f in $src; do
 		o="$T/o/$kind.${f%.c}.42.o"
 		[ -f "$o" ] || return
+		# symboles non définis (U) et symboles définis, tous .o confondus :
+		# tes propres fonctions (ft_strlen refaite dans le utils...) sont donc autorisées.
 		und="$und $(nm -u "$o" 2>/dev/null | awk '{print $NF}')"
 		def="$def $(nm "$o" 2>/dev/null | awk 'NF==3 && $2 ~ /^[TtDdBbRrSsCcWwVv]$/ {print $3}')"
 		sym=$(nm "$o" 2>/dev/null | awk '$2 ~ /^[BDCGS]$/ {print $3}' | tr '\n' ' ')
@@ -651,12 +656,12 @@ static_checks() {
 		printf '%s\n' $def | grep -qx "$sym" && continue
 		all_forb="$all_forb $sym"
 	done
-	if [ -z "$all_forb" ]; then ok "seules fonctions externes utilisées : read, malloc, free"
-	else ko "fonction(s) externe(s) interdite(s) utilisée(s) :$all_forb" "Autorisées : read, malloc, free."; fi
+	if [ -z "$all_forb" ]; then ok "seules fonctions externes utilisées : read, malloc, free (+ tes propres fonctions)"
+	else ko "fonction(s) externe(s) interdite(s) utilisée(s) :$all_forb" "Autorisées : read, malloc, free."$'\n'"Pas de libft (ni lseek, printf, strlen, calloc...). Tu peux par contre RECODER tes propres"$'\n'"fonctions (ex: ft_strlen) dans get_next_line_utils.c, tant que tu n'inclus pas libft."; fi
 	if [ -z "$all_glob" ]; then ok "aucune variable globale"
 	else ko "variable(s) globale(s) interdite(s)" "$all_glob"; fi
 	if [ -n "$all_fs" ]; then
-		warn "variable statique au niveau du fichier (c'est une globale déguisée)" "$all_fs"$'\n'"Mets-la DANS la fonction."
+		warn "variable statique au niveau du fichier (c'est une globale déguisée)" "$all_fs"$'\n'"Mets-la DANS la fonction (static char *stash; à l'intérieur de get_next_line)."
 	fi
 	if [ "$kind" = b ]; then
 		nstat=$(printf '%s\n' $names | grep -c .)
@@ -664,44 +669,110 @@ static_checks() {
 		else ko "bonus : $nstat variables statiques détectées (1 seule autorisée)" "Trouvées :$names"; fi
 	fi
 	if grep -qE '#[[:space:]]*include[[:space:]]*[<"][^>"]*libft' "$DIR"/*.c "$DIR"/*.h 2>/dev/null; then
-		ko "libft incluse (interdit)"
+		ko "libft incluse (interdit : recode plutôt tes fonctions dans get_next_line_utils.c)"
 	fi
 }
 
-header_checks() {
+header_checks() { # $1 = header
 	local h="$DIR/$1"
 	[ -f "$h" ] || return
 	if tr '\n' ' ' < "$h" | grep -Eq 'char[[:space:]]*\*[[:space:]]*get_next_line[[:space:]]*\([[:space:]]*int'; then
 		ok "$1 contient le prototype de get_next_line(int fd)"
 	else ko "$1 : prototype 'char *get_next_line(int fd);' introuvable"; fi
 	if grep -qE '#[[:space:]]*(ifndef|pragma[[:space:]]+once)' "$h"; then ok "$1 : protection contre la double inclusion"
-	else warn "$1 : pas d'include guard"; fi
+	else warn "$1 : pas d'include guard (#ifndef / #define / #endif)"; fi
 	if grep -Eq '#[[:space:]]*include[[:space:]]*"?<?libft' "$h"; then ko "$1 inclut libft (interdit)"; fi
 }
 
-# ───────────────────────────── README (Présence uniquement) ─────────────────
+# ───────────────────────────── README ──────────────────────────────────────
+# texte d'une section markdown (jusqu'au titre suivant) : $1 = regex du titre
+readme_section() {
+	awk -v pat="$1" '
+		BEGIN { IGNORECASE = 1; on = 0 }
+		/^[[:space:]]*#+/ {
+			t = $0; gsub(/^[[:space:]]*#+[[:space:]]*[*_]*[[:space:]]*/, "", t)
+			if (on) exit
+			if (tolower(t) ~ pat) { on = 1; next }
+		}
+		on { print }
+	' "$README" | tr -d '\r'
+}
+
 check_readme() {
+	local alt first logins sec words
 	README="$DIR/README.md"
 	if [ ! -f "$README" ]; then
-		ko "README.md introuvable à la racine" "Le fichier doit s'appeler exactement README.md."
+		alt=$(ls "$DIR" 2>/dev/null | grep -iE '^readme' | head -n 1)
+		if [ -n "$alt" ]; then ko "README.md introuvable" "Trouvé : '$alt' → le nom doit être exactement README.md (majuscules incluses)."
+		else ko "README.md introuvable" "Il doit être à la racine du dépôt."; fi
+		return
+	fi
+	ok "README.md présent à la racine"
+
+	# 1ère ligne : *This project has been created as part of the 42 curriculum by login1[, login2[, login3]].*
+	first=$(head -n 1 "$README" | tr -d '\r')
+	if ! printf '%s' "$first" | grep -Eq '^[*_]This project has been created as part of the 42 curriculum by .+[*_]$|^[*_]This project has been created as part of the 42 curriculum by .+\.[*_]$|^[*_]This project has been created as part of the 42 curriculum by .+[*_]\.$'; then
+		ko "1ʳᵉ ligne du README : phrase obligatoire absente ou mal écrite" "Attendu : *This project has been created as part of the 42 curriculum by login1, login2.*"$'\n'"(1ʳᵉ ligne du fichier, en italique avec * ou _, texte EXACT, anglais)"$'\n'"Reçu    : $first"
 	else
-		ok "README.md présent à la racine"
+		logins=$(printf '%s' "$first" | sed -E 's/^[*_]This project has been created as part of the 42 curriculum by //; s/\.?[*_]\.?$//')
+		if printf '%s' "$logins" | grep -Eq '<|>|login[0-9]|\[|\]|^[[:space:]]*$'; then
+			ko "1ʳᵉ ligne du README : logins non remplacés" "Remplace <login1>... par ton vrai login 42. Reçu : $logins"
+		elif ! printf '%s' "$logins" | grep -Eq '^[A-Za-z0-9_-]+(, [A-Za-z0-9_-]+){0,2}$'; then
+			warn "1ʳᵉ ligne du README : format des logins inhabituel" "Attendu : login1, login2, login3 (séparés par une virgule). Reçu : $logins"
+		else
+			ok "1ʳᵉ ligne du README : phrase obligatoire en italique, logins : $logins"
+		fi
+	fi
+
+	# sections obligatoires (titre + contenu non vide)
+	for sec in "description|Description" "instructions?|Instructions" "ress?ources?|Resources"; do
+		local pat=${sec%%|*} name=${sec##*|} body
+		if ! grep -Eiq "^[[:space:]]*#{1,6}[[:space:]]*[*_]*[[:space:]]*($pat)" "$README"; then
+			ko "README : section « $name » manquante" "Ajoute un titre markdown : ## $name"
+			continue
+		fi
+		body=$(readme_section "^($pat)")
+		words=$(printf '%s' "$body" | wc -w | tr -d ' ')
+		if [ "${words:-0}" -lt 8 ]; then
+			ko "README : section « $name » vide ou trop pauvre ($words mots)" "Cette section doit être réellement rédigée."
+		else
+			ok "README : section « $name » présente et remplie ($words mots)"
+		fi
+	done
+
+	# contenu attendu dans Resources : références + usage de l'IA
+	body=$(readme_section "^(ress?ources?)")
+	if printf '%s' "$body" | grep -Eiq '(^|[^a-z])(ai|ia|chatgpt|claude|copilot|gemini|llm|mistral|cursor)([^a-z]|$)'; then
+		ok "README : usage de l'IA décrit dans Resources"
+	else
+		warn "README : Resources ne décrit pas l'usage de l'IA" "Il faut dire comment l'IA a été utilisée (pour quelles tâches, quelles parties) — ou qu'elle ne l'a pas été."
+	fi
+	if printf '%s' "$body" | grep -Eiq 'http|\]\(|man |documentation|article|tutorial|tutoriel'; then
+		ok "README : références classiques listées dans Resources"
+	else
+		warn "README : aucune référence (liens, doc, articles) dans Resources"
+	fi
+	# algorithme
+	if grep -Eiq 'algorithm|algorithme' "$README"; then
+		ok "README : explication de l'algorithme présente"
+	else
+		warn "README : explication/justification de l'algorithme introuvable" "Le sujet exige une explication DÉTAILLÉE et JUSTIFIÉE de l'algorithme choisi."
 	fi
 }
 
 # ───────────────────────────── fichiers ────────────────────────────────────
-check_files() {
+check_files() { # $1=liste $2=m|b
 	local f similar top
 	for f in $1; do
 		if [ -f "$DIR/$f" ]; then ok "$f présent à la racine"
 		else
 			similar=$(ls "$DIR" 2>/dev/null | grep -iE 'get.?next|gnl' | tr '\n' ' ')
-			ko "$f introuvable à la racine" "Nom exact attendu${similar:+. Fichiers ressemblants : $similar}"
+			ko "$f introuvable à la racine" "Nom exact attendu (casse, underscores, extension)${similar:+. Fichiers qui ressemblent : $similar}"
 		fi
 	done
 	if [ "$2" = m ] && git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 		top=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)
-		[ "$top" != "$DIR" ] && warn "le dossier testé n'est pas la racine du dépôt git" "Racine git : $top"
+		[ "$top" != "$DIR" ] && warn "le dossier testé n'est pas la racine du dépôt git" "Racine git : $top — les fichiers doivent être À LA RACINE du dépôt."
 		if git -C "$DIR" ls-files 2>/dev/null | grep -qE '(\.o$|(^|/)a\.out$|\.DS_Store|\.dSYM)'; then
 			warn "fichiers inutiles versionnés (.o, a.out, .DS_Store...)" "$(git -C "$DIR" ls-files | grep -E '(\.o$|(^|/)a\.out$|\.DS_Store|\.dSYM)' | head -n 5)"
 		fi
@@ -709,7 +780,7 @@ check_files() {
 }
 
 # ───────────────────────────── mémoire ─────────────────────────────────────
-mem_case() {
+mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 	local label=$1 len=$2 bin=$3 out rc lost reach inval where summary
 	shift 3
 	if [ "$MEM_TOOL" = valgrind ]; then
@@ -721,11 +792,11 @@ mem_case() {
 		inval=$(printf '%s\n' "$out" | grep -E 'Invalid (read|write|free)|Mismatched free|uninitialised value|Conditional jump' | sed 's/^==[0-9]*== *//' | sort | uniq -c | head -n 3)
 		where=$(printf '%s\n' "$out" | grep -E '(at|by) 0x' | grep -E 'get_next_line|utils' | head -n 2 | sed 's/^==[0-9]*== *//')
 		if [ -n "$inval" ]; then
-			warn "$label : accès mémoire invalide" "$inval"$'\n'"$where"
+			warn "$label : accès mémoire invalide" "$inval"$'\n'"$where"$'\n'"Ça peut passer par chance mais crashera ailleurs (autre machine/moulinette)."
 		elif [ -n "$lost" ]; then
-			warn "$label : FUITE MÉMOIRE" "$lost"$'\n'"Allocation : $where"
+			warn "$label : FUITE MÉMOIRE" "$lost"$'\n'"Allocation : $where"$'\n'"Les fuites ne sont pas tolérées par le sujet."
 		elif [ -n "$reach" ] && [ "$len" = 0 ]; then
-			warn "$label : mémoire non libérée en fin de fichier (still reachable)" "$reach"$'\n'"Allocation : $where"
+			warn "$label : mémoire non libérée en fin de fichier (still reachable)" "$reach"$'\n'"Quand EOF est atteint, libère le stash (free + remise à NULL)."$'\n'"Allocation : $where"
 		else
 			ok "$label : aucune fuite / aucune erreur mémoire"
 		fi
@@ -738,17 +809,18 @@ mem_case() {
 			where=$(printf '%s\n' "$out" | grep -E '#[0-9]+ .*(get_next_line|utils)' | head -n 3)
 			warn "$label : problème mémoire (AddressSanitizer)" "$summary"$'\n'"$where"
 		else
-			ok "$label : aucune erreur mémoire"
+			ok "$label : aucune erreur mémoire$([ "$leak" = 0 ] && echo ' (fuites non détectables sans valgrind sur ce système)')"
 		fi
 	fi
 }
 
-mem_suite() {
+mem_suite() { # $1=m|b
 	local kind=$1 bs bin F="$T/f"
 	if [ "$MEM_TOOL" = none ]; then
-		warn "ni valgrind ni AddressSanitizer disponibles : fuites mémoire non testées" "Installe valgrind pour tester les leaks."
+		warn "ni valgrind ni AddressSanitizer disponibles : fuites mémoire non testées" "Installe valgrind (sudo apt install valgrind) pour tester les leaks."
 		return
 	fi
+	printf '  %s(outil : %s)%s\n' "$GRAY" "$MEM_TOOL" "$RST"
 	for bs in 1 42 9999; do
 		bin="$T/bin/mem_${kind}_$bs"
 		if ! build_mem "$bs" "$bin" "$kind"; then warn "build mémoire BUFFER_SIZE=$bs échoué" "$(head -n 5 "$T/build.log")"; continue; fi
@@ -763,7 +835,8 @@ mem_suite() {
 	done
 }
 
-# ───────────────────────────── git ──────────────────────────────────────────
+# ───────────────────────────── git (informatif) ────────────────────────────
+GIT_LINES=""
 git_check() {
 	local g="git -C $DIR" dirty ahead up f untracked=""
 	printf '\n%s━━━ GIT (informatif, non compté dans la note) ━━━%s\n' "$CYAN" "$RST"
@@ -774,7 +847,7 @@ git_check() {
 	for f in $M_FILES README.md; do
 		$g ls-files --error-unmatch "$f" >/dev/null 2>&1 || { [ -f "$DIR/$f" ] && untracked="$untracked $f"; }
 	done
-	dirty=$($g status --porcelain 2>/dev/null | grep -v "^?? ${SCRIPT_NAME}$" | wc -l | tr -d ' ')
+	dirty=$($g status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 	up=$($g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
 	if [ -z "$($g log -1 --format=%h 2>/dev/null)" ]; then
 		printf '  %sATTENTION : aucun commit → git add / commit / push pas fait.%s\n' "$YEL" "$RST"
@@ -789,7 +862,7 @@ git_check() {
 		if [ "${ahead:-0}" -gt 0 ]; then
 			printf '  %sATTENTION : %s commit(s) pas encore push vers %s → git push pas fait.%s\n' "$YEL" "$ahead" "$up" "$RST"
 		else
-			printf '  %s✔ git : tout est commit et push (%s à jour).%s\n' "$GREEN" "$up" "$RST"
+			printf '  %s✔ git : tout est commit et push (%s à jour, d'"'"'après la dernière info distante connue).%s\n' "$GREEN" "$up" "$RST"
 		fi
 	fi
 }
@@ -848,8 +921,10 @@ title "4. Compilation"
 if [ "$MISSING" -eq 1 ]; then
 	ko "fichiers .c manquants : compilation et tests impossibles"
 else
-	build "" "$T/bin/h_m_none" m || ko "ne compile pas sans -D BUFFER_SIZE" "$(head -n 8 "$T/build.log")"
+	if build "" "$T/bin/h_m_none" m; then ok "compile SANS -D BUFFER_SIZE (valeur par défaut présente)"
+	else ko "ne compile pas sans -D BUFFER_SIZE" "$(head -n 8 "$T/build.log")"$'\n'"Ajoute dans le .h : #ifndef BUFFER_SIZE / # define BUFFER_SIZE 42 / #endif"; fi
 	if build 42 "$T/bin/h_m_42" m; then
+		ok "cc -Wall -Wextra -Werror -D BUFFER_SIZE=42 get_next_line.c get_next_line_utils.c"
 		static_checks m
 	else
 		ko "compilation -Wall -Wextra -Werror -D BUFFER_SIZE=42" "$(head -n 10 "$T/build.log")"
@@ -858,6 +933,7 @@ else
 	title "5. Tests fonctionnels (obligatoire)"
 	for bs in $BS_LIST; do suite_bs m "$bs"; done
 	if [ -x "$T/bin/h_m_none" ]; then
+		printf '\n%s▸ sans -D BUFFER_SIZE (valeur par défaut)%s\n' "$BOLD" "$RST"
 		HINT=""
 		run_case "lecture correcte avec la valeur par défaut" "$T/bin/h_m_none" file "$T/f/multi_nonl"
 	fi
@@ -903,11 +979,13 @@ else
 	else
 		title "B2. BONUS : compilation & analyse"
 		if build 42 "$T/bin/h_b_42" b; then
+			ok "cc -Wall -Wextra -Werror -D BUFFER_SIZE=42 get_next_line_bonus.c get_next_line_utils_bonus.c"
 			static_checks b
 		else
 			ko "compilation bonus BUFFER_SIZE=42" "$(head -n 10 "$T/build.log")"
 		fi
-		build "" "$T/bin/h_b_none" b || ko "bonus : ne compile pas sans -D BUFFER_SIZE" "$(head -n 6 "$T/build.log")"
+		if build "" "$T/bin/h_b_none" b; then ok "bonus : compile sans -D BUFFER_SIZE"
+		else ko "bonus : ne compile pas sans -D BUFFER_SIZE" "$(head -n 6 "$T/build.log")"; fi
 
 		title "B3. BONUS : tests fonctionnels (mono-fd)"
 		for bs in $BS_BONUS; do suite_bs b "$bs"; done
