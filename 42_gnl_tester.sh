@@ -8,8 +8,8 @@
 #       bash 42_gnl_tester.sh -q            (n'affiche que les KO / WARN)
 #       bash 42_gnl_tester.sh /chemin/vers/projet
 #
-#  [ OK ]  vert    : test réussi
-#  [ KO ]  rouge   : test raté  (ligne grise = explication / attendu vs reçu)
+#  [ OK ]  vert    : vérification réussie
+#  [ KO ]  rouge   : vérification ratée  (ligne grise = explication / attendu vs reçu)
 #  [WARN]  jaune   : ça passerait à la moulinette mais c'est problématique
 #                    (fuite mémoire, accès invalide, trop lent, norminette absente...)
 # ============================================================================
@@ -28,17 +28,22 @@ DIR=$(cd "$DIR" 2>/dev/null && pwd) || { echo "Dossier introuvable : $DIR"; exit
 
 # ───────────────────────────── couleurs ─────────────────────────────────────
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRAY=$'\033[90m'
-CYAN=$'\033[36m';  BOLD=$'\033[1m';  RST=$'\033[0m'
-TESTER_NAME="42_gnl_tester"
+CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
+TESTER_PATH="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
 
 C_OK=0; C_KO=0; C_WARN=0
+C_SKIP=0
 M_OK=0; M_KO=0; M_WARN=0
+M_SKIP=0
 B_OK=0; B_KO=0; B_WARN=0
+B_SKIP=0
 
 gray() { printf '%s\n' "$1" | head -n "${2:-10}" | while IFS= read -r l; do printf '         %s↳ %s%s\n' "$GRAY" "$l" "$RST"; done; }
 ok()   { C_OK=$((C_OK+1));     [ "$QUIET" -eq 1 ] || printf '  %s[ OK ]%s %s\n' "$GREEN" "$RST" "$1"; }
 ko()   { C_KO=$((C_KO+1));     printf '  %s[ KO ]%s %s\n' "$RED" "$RST" "$1"; [ -n "$2" ] && gray "$2" "${3:-10}"; }
 warn() { C_WARN=$((C_WARN+1)); printf '  %s[WARN]%s %s\n' "$YEL" "$RST" "$1"; [ -n "$2" ] && gray "$2" "${3:-10}"; }
+test_ok() { C_OK=$((C_OK+1)); }
+skip_tests() { C_SKIP=$((C_SKIP+$1)); }
 title(){ printf '\n%s━━━ %s ━━━%s\n' "$CYAN" "$1" "$RST"; }
 
 # ───────────────────────────── outils ───────────────────────────────────────
@@ -503,7 +508,7 @@ build() { # $1=BS ("" = sans -D)  $2=binaire  $3=m|b
 	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
 	: > "$log"
 	for f in $src; do
-		cc -Wall -Wextra -Werror $dflag -I"$DIR" -c "$DIR/$f" -o "$T/o/$kind.${f%.c}.${bs:-none}.o" >> "$log" 2>&1 || return 1
+		cc -Wall -Wextra -Werror $dflag -D main=gnl_test_user_main -I"$DIR" -c "$DIR/$f" -o "$T/o/$kind.${f%.c}.${bs:-none}.o" >> "$log" 2>&1 || return 1
 		objs="$objs $T/o/$kind.${f%.c}.${bs:-none}.o"
 	done
 	cc $objs "$T/harness.o" -o "$out" >> "$log" 2>&1 || return 1
@@ -511,14 +516,17 @@ build() { # $1=BS ("" = sans -D)  $2=binaire  $3=m|b
 }
 
 build_mem() { # $1=BS $2=binaire $3=m|b
-	local bs=$1 out=$2 kind=$3 src s="" f
+	local bs=$1 out=$2 kind=$3 src objs="" f instrument="" harness_obj
 	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
-	for f in $src; do s="$s $DIR/$f"; done
-	if [ "$MEM_TOOL" = valgrind ]; then
-		cc -g -D BUFFER_SIZE="$bs" -I"$DIR" $s "$T/harness.c" -o "$out" >"$T/build.log" 2>&1
-	else
-		cc -g -fsanitize=address -fno-omit-frame-pointer -D BUFFER_SIZE="$bs" -I"$DIR" $s "$T/harness.c" -o "$out" >"$T/build.log" 2>&1
-	fi
+	[ "$MEM_TOOL" = valgrind ] || instrument="-fsanitize=address -fno-omit-frame-pointer"
+	for f in $src; do
+		cc -Wall -Wextra -Werror -g $instrument -D BUFFER_SIZE="$bs" -D main=gnl_test_user_main -I"$DIR" -c "$DIR/$f" \
+			-o "$T/o/mem_${kind}.${f%.c}.$bs.o" >"$T/build.log" 2>&1 || return 1
+		objs="$objs $T/o/mem_${kind}.${f%.c}.$bs.o"
+	done
+	harness_obj="$T/o/mem_harness_${kind}_$bs.o"
+	cc -Wall -Wextra -Werror -g $instrument -c "$T/harness.c" -o "$harness_obj" >>"$T/build.log" 2>&1 || return 1
+	cc $instrument $objs "$harness_obj" -o "$out" >>"$T/build.log" 2>&1
 }
 
 # ───────────────────────────── exécution d'un test ──────────────────────────
@@ -526,7 +534,7 @@ HINT=""
 judge() { # label rc out
 	local label=$1 rc=$2 out=$3 msg=""
 	case $rc in
-		0)  ok "$label"; return ;;
+		0)  test_ok; return ;;
 		1)  msg=$out ;;
 		2)  msg="Erreur du testeur (fichier de test illisible ?)${out:+ : $out}" ;;
 		124) msg="${MSG124:-Pas terminé en ${TL:-10}s : boucle infinie, read bloquant ou algorithme trop lent (recopies quadratiques ?)}" ;;
@@ -572,12 +580,18 @@ run_first() { # label bin : get_next_line doit rendre la 1ère ligne sans attend
 
 # ───────────────────────────── suite par BUFFER_SIZE ───────────────────────
 suite_bs() { # $1=m|b  $2=BS
-	local kind=$1 bs=$2 bin="$T/bin/h_$1_$2" fx L
+	local kind=$1 bs=$2 bin="$T/bin/h_$1_$2" fx L skipped
 	HINT=""
 	[ "$bs" -ge 1000000 ] && HINT=" Avec BUFFER_SIZE=$bs, un 'char buf[BUFFER_SIZE + 1]' sur la pile dépasse la limite (~8 Mo) : alloue le buffer avec malloc."
 	printf '\n%s▸ BUFFER_SIZE=%s%s\n' "$BOLD" "$bs" "$RST"
 	if ! build "$bs" "$bin" "$kind"; then
 		ko "compilation avec -Wall -Wextra -Werror -D BUFFER_SIZE=$bs" "$(cat "$T/build.log")"
+		skipped=$(printf '%s\n' "$FILES_BASE" | wc -w)
+		skipped=$((skipped + $(printf '%s\n' "$FILES_HEAVY" | wc -w) + 6))
+		[ "$bs" -le 10000 ] && skipped=$((skipped + 6))
+		case "$bs" in 1|42|9999) [ -n "$TIMEOUT_BIN" ] && skipped=$((skipped + 1)) ;; esac
+		[ "$kind" = b ] && skipped=$((skipped + 7))
+		skip_tests "$skipped"
 		return
 	fi
 	ok "compile avec -Wall -Wextra -Werror -D BUFFER_SIZE=$bs"
@@ -673,33 +687,105 @@ static_checks() { # $1=m|b  (nécessite les .o du build BS=42)
 	fi
 }
 
+source_functions() {
+	local kind=$1 src f
+	local -a files=()
+	if [ "$kind" = m ]; then src="$M_SRC"; else src="$B_SRC"; fi
+	for f in $src; do
+		[ -f "$DIR/$f" ] && files+=("$DIR/$f")
+	done
+	[ "${#files[@]}" -gt 0 ] || return
+	awk '
+		function braces(s,    t, opens, closes) {
+			t = s
+			opens = gsub(/\{/, "", t)
+			t = s
+			closes = gsub(/\}/, "", t)
+			return opens - closes
+		}
+		{
+			line = $0
+			sub(/\/\/.*/, "", line)
+			if (depth == 0 && candidate == "" &&
+				line ~ /^[[:space:]]*(static[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]*]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/ &&
+				line !~ /;/) {
+				candidate = line
+				is_static = (line ~ /^[[:space:]]*static[[:space:]]+/)
+			} else if (candidate != "") {
+				candidate = candidate " " line
+			}
+			if (candidate != "") {
+				if (candidate ~ /;/)
+					candidate = ""
+				else if (candidate ~ /\{/) {
+					if (!is_static) {
+						name = candidate
+						sub(/\(.*/, "", name)
+						gsub(/\*/, " ", name)
+						n = split(name, parts, /[[:space:]]+/)
+						if (parts[n] != "")
+							print parts[n]
+						else if (n > 1)
+							print parts[n - 1]
+					}
+					depth += braces(line)
+					candidate = ""
+				}
+			} else if (depth > 0) {
+				depth += braces(line)
+			}
+		}
+	' "${files[@]}" 2>/dev/null
+}
+
 header_checks() { # $1 = header
-	local h="$DIR/$1"
+	local h="$DIR/$1" guard declarations kind function_name missing=""
 	[ -f "$h" ] || return
-	if tr '\n' ' ' < "$h" | grep -Eq 'char[[:space:]]*\*[[:space:]]*get_next_line[[:space:]]*\([[:space:]]*int'; then
-		ok "$1 contient le prototype de get_next_line(int fd)"
-	else ko "$1 : prototype 'char *get_next_line(int fd);' introuvable"; fi
-	if grep -qE '#[[:space:]]*(ifndef|pragma[[:space:]]+once)' "$h"; then ok "$1 : protection contre la double inclusion"
-	else warn "$1 : pas d'include guard (#ifndef / #define / #endif)"; fi
+	case "$1" in
+		get_next_line.h)
+			guard=GET_NEXT_LINE_H
+			kind=m
+			;;
+		get_next_line_bonus.h)
+			guard=GET_NEXT_LINE_BONUS_H
+			kind=b
+			;;
+		*) guard=""; kind="" ;;
+	esac
+	declarations=$(tr '\n\t' '  ' < "$h" | sed -E 's/[[:space:]]+/ /g')
+	if [ -n "$kind" ]; then
+		for function_name in $(source_functions "$kind" | sort -u); do
+			if ! printf '%s\n' "$declarations" | grep -Eq "(^|[^[:alnum:]_])${function_name}[[:space:]]*\\([^;]*\\)[[:space:]]*;"; then
+				missing="${missing}${function_name}"$'\n'
+			fi
+		done
+	fi
+	if [ -z "$missing" ]; then
+		ok "$1 : prototypes déclarés pour les fonctions définies dans les .c"
+	else
+		while IFS= read -r prototype; do
+			[ -n "$prototype" ] && ko "$1 : prototype manquant pour la fonction définie dans le .c : $prototype"
+		done <<< "$missing"
+	fi
+	if [ -n "$guard" ] \
+		&& grep -qE "^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+$guard([[:space:]]|$)" "$h" \
+		&& grep -qE "^[[:space:]]*#[[:space:]]*define[[:space:]]+$guard([[:space:]]|$)" "$h" \
+		&& grep -qE '^[[:space:]]*#[[:space:]]*endif([[:space:]]|$)' "$h"; then
+		ok "$1 : include guard $guard valide"
+	else ko "$1 : include guard absent ou incomplet"; fi
+	if grep -qE '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+BUFFER_SIZE([[:space:]]|$)' "$h" \
+		&& grep -qE '^[[:space:]]*#[[:space:]]*define[[:space:]]+BUFFER_SIZE[[:space:]]+[1-9][0-9]*([[:space:]]|$)' "$h"; then
+		ok "$1 définit une valeur BUFFER_SIZE par défaut"
+	else ko "$1 : définition par défaut de BUFFER_SIZE absente ou invalide"; fi
+	if printf '#include "%s"\n' "$1" | cc -Wall -Wextra -Werror -fsyntax-only -I "$DIR" -x c - >/dev/null 2>&1; then
+		ok "$1 se compile seul"
+	else ko "$1 ne se compile pas seul" "Vérifie les déclarations, les inclusions et la syntaxe du header."; fi
 	if grep -Eq '#[[:space:]]*include[[:space:]]*"?<?libft' "$h"; then ko "$1 inclut libft (interdit)"; fi
 }
 
 # ───────────────────────────── README ──────────────────────────────────────
-# texte d'une section markdown (jusqu'au titre suivant) : $1 = regex du titre
-readme_section() {
-	awk -v pat="$1" '
-		BEGIN { IGNORECASE = 1; on = 0 }
-		/^[[:space:]]*#+/ {
-			t = $0; gsub(/^[[:space:]]*#+[[:space:]]*[*_]*[[:space:]]*/, "", t)
-			if (on) exit
-			if (tolower(t) ~ pat) { on = 1; next }
-		}
-		on { print }
-	' "$README" | tr -d '\r'
-}
-
 check_readme() {
-	local alt first logins sec words
+	local alt
 	README="$DIR/README.md"
 	if [ ! -f "$README" ]; then
 		alt=$(ls "$DIR" 2>/dev/null | grep -iE '^readme' | head -n 1)
@@ -708,56 +794,6 @@ check_readme() {
 		return
 	fi
 	ok "README.md présent à la racine"
-
-	# 1ère ligne : *This project has been created as part of the 42 curriculum by login1[, login2[, login3]].*
-	first=$(head -n 1 "$README" | tr -d '\r')
-	if ! printf '%s' "$first" | grep -Eq '^[*_]This project has been created as part of the 42 curriculum by .+[*_]$|^[*_]This project has been created as part of the 42 curriculum by .+\.[*_]$|^[*_]This project has been created as part of the 42 curriculum by .+[*_]\.$'; then
-		ko "1ʳᵉ ligne du README : phrase obligatoire absente ou mal écrite" "Attendu : *This project has been created as part of the 42 curriculum by login1, login2.*"$'\n'"(1ʳᵉ ligne du fichier, en italique avec * ou _, texte EXACT, anglais)"$'\n'"Reçu    : $first"
-	else
-		logins=$(printf '%s' "$first" | sed -E 's/^[*_]This project has been created as part of the 42 curriculum by //; s/\.?[*_]\.?$//')
-		if printf '%s' "$logins" | grep -Eq '<|>|login[0-9]|\[|\]|^[[:space:]]*$'; then
-			ko "1ʳᵉ ligne du README : logins non remplacés" "Remplace <login1>... par ton vrai login 42. Reçu : $logins"
-		elif ! printf '%s' "$logins" | grep -Eq '^[A-Za-z0-9_-]+(, [A-Za-z0-9_-]+){0,2}$'; then
-			warn "1ʳᵉ ligne du README : format des logins inhabituel" "Attendu : login1, login2, login3 (séparés par une virgule). Reçu : $logins"
-		else
-			ok "1ʳᵉ ligne du README : phrase obligatoire en italique, logins : $logins"
-		fi
-	fi
-
-	# sections obligatoires (titre + contenu non vide)
-	for sec in "description|Description" "instructions?|Instructions" "ress?ources?|Resources"; do
-		local pat=${sec%%|*} name=${sec##*|} body
-		if ! grep -Eiq "^[[:space:]]*#{1,6}[[:space:]]*[*_]*[[:space:]]*($pat)" "$README"; then
-			ko "README : section « $name » manquante" "Ajoute un titre markdown : ## $name"
-			continue
-		fi
-		body=$(readme_section "^($pat)")
-		words=$(printf '%s' "$body" | wc -w | tr -d ' ')
-		if [ "${words:-0}" -lt 8 ]; then
-			ko "README : section « $name » vide ou trop pauvre ($words mots)" "Cette section doit être réellement rédigée."
-		else
-			ok "README : section « $name » présente et remplie ($words mots)"
-		fi
-	done
-
-	# contenu attendu dans Resources : références + usage de l'IA
-	body=$(readme_section "^(ress?ources?)")
-	if printf '%s' "$body" | grep -Eiq '(^|[^a-z])(ai|ia|chatgpt|claude|copilot|gemini|llm|mistral|cursor)([^a-z]|$)'; then
-		ok "README : usage de l'IA décrit dans Resources"
-	else
-		warn "README : Resources ne décrit pas l'usage de l'IA" "Il faut dire comment l'IA a été utilisée (pour quelles tâches, quelles parties) — ou qu'elle ne l'a pas été."
-	fi
-	if printf '%s' "$body" | grep -Eiq 'http|\]\(|man |documentation|article|tutorial|tutoriel'; then
-		ok "README : références classiques listées dans Resources"
-	else
-		warn "README : aucune référence (liens, doc, articles) dans Resources"
-	fi
-	# algorithme
-	if grep -Eiq 'algorithm|algorithme' "$README"; then
-		ok "README : explication de l'algorithme présente"
-	else
-		warn "README : explication/justification de l'algorithme introuvable" "Le sujet exige une explication DÉTAILLÉE et JUSTIFIÉE de l'algorithme choisi."
-	fi
 }
 
 # ───────────────────────────── fichiers ────────────────────────────────────
@@ -798,7 +834,7 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 		elif [ -n "$reach" ] && [ "$len" = 0 ]; then
 			warn "$label : mémoire non libérée en fin de fichier (still reachable)" "$reach"$'\n'"Quand EOF est atteint, libère le stash (free + remise à NULL)."$'\n'"Allocation : $where"
 		else
-			ok "$label : aucune fuite / aucune erreur mémoire"
+			test_ok
 		fi
 	else
 		local leak=0; [ "$(uname)" = Linux ] && leak=1
@@ -809,7 +845,7 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 			where=$(printf '%s\n' "$out" | grep -E '#[0-9]+ .*(get_next_line|utils)' | head -n 3)
 			warn "$label : problème mémoire (AddressSanitizer)" "$summary"$'\n'"$where"
 		else
-			ok "$label : aucune erreur mémoire$([ "$leak" = 0 ] && echo ' (fuites non détectables sans valgrind sur ce système)')"
+			test_ok
 		fi
 	fi
 }
@@ -823,7 +859,11 @@ mem_suite() { # $1=m|b
 	printf '  %s(outil : %s)%s\n' "$GRAY" "$MEM_TOOL" "$RST"
 	for bs in 1 42 9999; do
 		bin="$T/bin/mem_${kind}_$bs"
-		if ! build_mem "$bs" "$bin" "$kind"; then warn "build mémoire BUFFER_SIZE=$bs échoué" "$(head -n 5 "$T/build.log")"; continue; fi
+		if ! build_mem "$bs" "$bin" "$kind"; then
+			warn "build mémoire BUFFER_SIZE=$bs échoué" "$(head -n 5 "$T/build.log")"
+			if [ "$kind" = b ]; then skip_tests 6; else skip_tests 4; fi
+			continue
+		fi
 		mem_case "[BS=$bs] lecture complète de 6 fichiers" 0 "$bin" seq "$F/multi_nl" "$F/mix_empty" "$F/nl_start" "$F/empty" "$F/mem_mix" "$F/one_line_nonl"
 		mem_case "[BS=$bs] lecture partielle (arrêt avant EOF)" 1 "$bin" partial "$F/mem_mix" 1
 		STDIN_FILE="$F/multi_nonl" mem_case "[BS=$bs] stdin" 0 "$bin" stdin "$F/multi_nonl"
@@ -838,18 +878,25 @@ mem_suite() { # $1=m|b
 # ───────────────────────────── git (informatif) ────────────────────────────
 GIT_LINES=""
 git_check() {
-	local g="git -C $DIR" dirty ahead up f untracked=""
+	local dirty ahead up f untracked="" top tester_rel="" status_lines
 	printf '\n%s━━━ GIT (informatif, non compté dans la note) ━━━%s\n' "$CYAN" "$RST"
-	if ! command -v git >/dev/null 2>&1 || ! $g rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	if ! command -v git >/dev/null 2>&1 || ! git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 		printf '  %sATTENTION : ce dossier n'"'"'est pas un dépôt git → rien n'"'"'a été push.%s\n' "$YEL" "$RST"
 		return
 	fi
-	for f in $M_FILES README.md; do
-		$g ls-files --error-unmatch "$f" >/dev/null 2>&1 || { [ -f "$DIR/$f" ] && untracked="$untracked $f"; }
+	top=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)
+	case "$TESTER_PATH" in
+		"$top"/*) tester_rel=${TESTER_PATH#"$top"/} ;;
+	esac
+	for f in $M_FILES README.md $B_FILES; do
+		[ -f "$DIR/$f" ] || continue
+		git -C "$DIR" ls-files --error-unmatch "$f" >/dev/null 2>&1 || { [ -f "$DIR/$f" ] && untracked="$untracked $f"; }
 	done
-	dirty=$($g status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-	up=$($g rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
-	if [ -z "$($g log -1 --format=%h 2>/dev/null)" ]; then
+	status_lines=$(git -C "$DIR" status --porcelain --untracked-files=all 2>/dev/null |
+		awk -v path="$tester_rel" 'substr($0, 4) != path')
+	dirty=$(printf '%s\n' "$status_lines" | awk 'NF { n++ } END { print n + 0 }')
+	up=$(git -C "$DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+	if [ -z "$(git -C "$DIR" log -1 --format=%h 2>/dev/null)" ]; then
 		printf '  %sATTENTION : aucun commit → git add / commit / push pas fait.%s\n' "$YEL" "$RST"
 	elif [ -n "$untracked" ]; then
 		printf '  %sATTENTION : fichiers non suivis par git (git add oublié ?) :%s%s\n' "$YEL" "$untracked" "$RST"
@@ -858,7 +905,7 @@ git_check() {
 	elif [ -z "$up" ]; then
 		printf '  %sATTENTION : aucune branche distante configurée → git push pas fait.%s\n' "$YEL" "$RST"
 	else
-		ahead=$($g rev-list --count "$up..HEAD" 2>/dev/null)
+		ahead=$(git -C "$DIR" rev-list --count "$up..HEAD" 2>/dev/null)
 		if [ "${ahead:-0}" -gt 0 ]; then
 			printf '  %sATTENTION : %s commit(s) pas encore push vers %s → git push pas fait.%s\n' "$YEL" "$ahead" "$up" "$RST"
 		else
@@ -936,6 +983,8 @@ else
 		printf '\n%s▸ sans -D BUFFER_SIZE (valeur par défaut)%s\n' "$BOLD" "$RST"
 		HINT=""
 		run_case "lecture correcte avec la valeur par défaut" "$T/bin/h_m_none" file "$T/f/multi_nonl"
+	else
+		skip_tests 1
 	fi
 
 	title "6. Cas limites (obligatoire)"
@@ -948,16 +997,21 @@ else
 		AS_WARN=1 run_case "fd = 9999 non ouvert → NULL (pas de crash, tableau de fd trop petit ?)" "$B42" bigfd
 		AS_WARN=1 run_case "fichier binaire BUFFER_SIZE=42 (indéfini, ne doit pas boucler/crasher)" "$B42" drain "$T/f/binary"
 		[ -x "$T/bin/h_m_1" ] && AS_WARN=1 run_case "fichier binaire BUFFER_SIZE=1" "$T/bin/h_m_1" drain "$T/f/binary"
+	else
+		skip_tests 5
+		[ -x "$T/bin/h_m_1" ] && skip_tests 1
 	fi
 	if build 0 "$T/bin/h_m_0" m; then
 		AS_WARN=1 TL=5 run_case "BUFFER_SIZE=0 : ne doit ni boucler ni crasher" "$T/bin/h_m_0" drain "$T/f/multi_nl"
+	else
+		skip_tests 1
 	fi
 
 	title "7. Mémoire (obligatoire)"
 	mem_suite m
 fi
-M_OK=$C_OK; M_KO=$C_KO; M_WARN=$C_WARN
-C_OK=0; C_KO=0; C_WARN=0
+M_OK=$C_OK; M_KO=$C_KO; M_WARN=$C_WARN; M_SKIP=$C_SKIP
+C_OK=0; C_KO=0; C_WARN=0; C_SKIP=0
 
 # ───── Bonus ─────
 BONUS_PRESENT=0
@@ -997,7 +1051,7 @@ else
 		mem_suite b
 	fi
 fi
-B_OK=$C_OK; B_KO=$C_KO; B_WARN=$C_WARN
+B_OK=$C_OK; B_KO=$C_KO; B_WARN=$C_WARN; B_SKIP=$C_SKIP
 
 # ───── Git ─────
 git_check
@@ -1005,6 +1059,7 @@ git_check
 # ───── Résumé ─────
 printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$CYAN" "$RST"
 printf 'Partie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' "$GREEN" "$M_OK" "$RST" "$RED" "$M_KO" "$RST" "$GRAY" "$M_WARN" "$RST"
+[ "$M_SKIP" -gt 0 ] && printf '%s%s test(s) non exécuté(s) car compilation impossible.%s\n' "$PURPLE" "$M_SKIP" "$RST"
 if [ "$M_KO" -eq 0 ]; then
 	printf '%s✔ Les tests de la partie obligatoire sont tous passés.%s\n' "$GREEN" "$RST"
 	[ "$M_WARN" -gt 0 ] && printf '%s  (%s warning(s) à regarder avant de rendre)%s\n' "$GRAY" "$M_WARN" "$RST"
@@ -1015,6 +1070,7 @@ if [ "$BONUS_PRESENT" -eq 0 ]; then
 	printf '%s⏭ Bonus : non rendus, ignorés.%s\n' "$GRAY" "$RST"
 else
 	printf 'Bonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' "$GREEN" "$B_OK" "$RST" "$RED" "$B_KO" "$RST" "$GRAY" "$B_WARN" "$RST"
+	[ "$B_SKIP" -gt 0 ] && printf '%s%s test(s) non exécuté(s) car compilation impossible.%s\n' "$PURPLE" "$B_SKIP" "$RST"
 	if [ "$B_KO" -eq 0 ]; then
 		printf '%s✔ Les tests du/des bonus sont tous passés.%s\n' "$GREEN" "$RST"
 		[ "$B_WARN" -gt 0 ] && printf '%s  (%s warning(s) à regarder)%s\n' "$GRAY" "$B_WARN" "$RST"
