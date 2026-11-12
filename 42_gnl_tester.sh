@@ -28,7 +28,7 @@ DIR=$(cd "$DIR" 2>/dev/null && pwd) || { echo "Dossier introuvable : $DIR"; exit
 
 # ───────────────────────────── couleurs ─────────────────────────────────────
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRAY=$'\033[90m'
-CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
+BLUE=$'\033[34m'; CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
 TESTER_PATH="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
 
 C_OK=0; C_KO=0; C_WARN=0
@@ -946,7 +946,7 @@ header() {
 ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 ║                                                 +#+#+#+#+#+   +#+            ║
 ║    Created: 2026/11/10 12:00:00 by enviale           #+#    #+#              ║
-║    Updated: 2026/11/10 12:35:27 by enviale          ###   ########.fr        ║
+║    Updated: 2026/11/12 13:40:58 by enviale          ###   ########.fr        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 HDR
@@ -1075,7 +1075,7 @@ B_OK=$C_OK; B_KO=$C_KO; B_WARN=$C_WARN; B_SKIP=$C_SKIP
 git_check
 
 # ───── Résumé ─────
-printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$CYAN" "$RST"
+printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$BLUE" "$RST"
 printf '%sPartie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
 	"$GRAY" "$GREEN" "$M_OK" "$GRAY" "$RED" "$M_KO" "$GRAY" "$YEL" "$M_WARN" "$GRAY" "$PURPLE" "$M_SKIP" "$GRAY"
 if [ "$M_KO" -eq 0 ]; then
@@ -1084,10 +1084,7 @@ if [ "$M_KO" -eq 0 ]; then
 else
 	printf '%s✘ Partie obligatoire : %s test(s) en échec, corrige les KO ci-dessus.%s\n' "$RED" "$M_KO" "$RST"
 fi
-if [ "$BONUS_PRESENT" -eq 0 ]; then
-	printf '%s⏭ Bonus : non rendus, %s%s test(s) ignoré(s).%s\n' \
-		"$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
-else
+if [ "$BONUS_PRESENT" -eq 1 ]; then
 	printf '%sBonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
 		"$GRAY" "$GREEN" "$B_OK" "$GRAY" "$RED" "$B_KO" "$GRAY" "$YEL" "$B_WARN" "$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 	if [ "$B_KO" -eq 0 ]; then

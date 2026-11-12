@@ -7,7 +7,7 @@
 # ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 # ║                                                 +#+#+#+#+#+   +#+            ║
 # ║    Created: 2026/11/12 12:00:00 by enviale           #+#    #+#              ║
-# ║    Updated: 2026/11/12 12:51:10 by enviale          ###   ########.fr        ║
+# ║    Updated: 2026/11/12 13:35:56 by enviale          ###   ########.fr        ║
 # ║                                                                              ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 #
@@ -56,10 +56,10 @@ DIR=$(cd "$DIR" 2>/dev/null && pwd -P) || {
 SCRIPT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")
 
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRAY=$'\033[90m'
-CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
+BLUE=$'\033[34m'; CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
 R=$RED; G=$GREEN; Y=$YEL; B=$CYAN; CY=$CYAN; BD=$BOLD; D=$GRAY; N=$RST
 if [ ! -t 1 ]; then
-	GREEN=''; RED=''; YEL=''; GRAY=''; CYAN=''; PURPLE=''; BOLD=''; RST=''
+	GREEN=''; RED=''; YEL=''; GRAY=''; BLUE=''; CYAN=''; PURPLE=''; BOLD=''; RST=''
 	R=''; G=''; Y=''; B=''; CY=''; BD=''; D=''; N=''
 fi
 
@@ -98,7 +98,7 @@ header()
 ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 ║                                                 +#+#+#+#+#+   +#+            ║
 ║    Created: 2026/11/12 12:00:00 by enviale           #+#    #+#              ║
-║    Updated: 2026/11/12 12:51:10 by enviale          ###   ########.fr        ║
+║    Updated: 2026/11/12 13:35:56 by enviale          ###   ########.fr        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 HDR
@@ -156,7 +156,7 @@ cleanup()
 	fi
 	rm -rf "$TMP"
 	git_check
-	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$GRAY" "$RST"
+	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$BLUE" "$RST"
 	printf '%sVérifications : %s%s OK%s, %s%s KO%s, %s%d warning(s)%s, %s%d ignorée(s)%s\n' \
 		"$GRAY" "$GREEN" "$N_OK" "$GRAY" "$RED" "$N_KO" "$GRAY" "$YEL" "$N_WARN" "$GRAY" \
 		"$PURPLE" "$N_SKIP" "$GRAY"
@@ -166,7 +166,7 @@ cleanup()
 		printf '%s✘ %s vérification(s) en échec : consulte les KO ci-dessus.%s\n' \
 			"$RED" "$N_KO" "$GRAY"
 	fi
-	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n\n' "$GRAY" "$GRAY"
+	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n' "$GRAY" "$GRAY"
 	printf '%sRappel : ce testeur ne remplace pas l’évaluation du sujet.%s\n\n' "$GRAY" "$GRAY"
 	return "$status"
 }
@@ -1719,7 +1719,7 @@ for fn in "${EXPECTED[@]}"; do
 	fi
 	if [ -f "$TMP/strict/$fn.o" ]; then
 		if command -v nm >/dev/null 2>&1; then
-			helper=$(nm --defined-only "$TMP/strict/$fn.o" | awk '$2 ~ /^[Tt]$/ {print $3}' | grep -vx "$fn" | tr '\n' ' ')
+			helper=$(nm --defined-only "$TMP/strict/$fn.o" | awk '$2 == "T" {print $3}' | grep -vxF "$fn" | tr '\n' ' ')
 			[ -n "$helper" ] && STYLE[$fn]="${STYLE[$fn]:+${STYLE[$fn]}; }fonction(s) auxiliaire non statique : $helper"
 		fi
 	fi

@@ -7,7 +7,7 @@
 # ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 # ║                                                 +#+#+#+#+#+   +#+            ║
 # ║    Created: 2026/11/12 12:00:00 by enviale           #+#    #+#              ║
-# ║    Updated: 2026/11/12 12:25:36 by enviale          ###   ########.fr        ║
+# ║    Updated: 2026/11/12 13:40:58 by enviale          ###   ########.fr        ║
 # ║                                                                              ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 #
@@ -46,7 +46,7 @@ SCRIPT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_
 
 # ───────────────────────────── couleurs ─────────────────────────────────────
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRAY=$'\033[90m'
-CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
+BLUE=$'\033[34m'; CYAN=$'\033[36m'; PURPLE=$'\033[35m'; BOLD=$'\033[1m'; RST=$'\033[0m'
 
 C_OK=0; C_KO=0; C_WARN=0; C_SKIP=0
 M_OK=0; M_KO=0; M_WARN=0; M_SKIP=0
@@ -104,7 +104,7 @@ header()
 ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 ║                                                 +#+#+#+#+#+   +#+            ║
 ║    Created: 2026/11/12 12:00:00 by enviale           #+#    #+#              ║
-║    Updated: 2026/11/12 12:25:36 by enviale          ###   ########.fr        ║
+║    Updated: 2026/11/12 13:40:58 by enviale          ###   ########.fr        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 HDR
@@ -199,7 +199,7 @@ cleanup()
 	fi
 	rm -rf "$T"
 	git_check
-	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$GRAY" "$RST"
+	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$BLUE" "$RST"
 	printf '%sPartie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
 		"$GRAY" "$GREEN" "$M_OK" "$GRAY" "$RED" "$M_KO" "$GRAY" "$YEL" "$M_WARN" "$GRAY" "$PURPLE" "$M_SKIP" "$GRAY"
 	if [ "$M_KO" -eq 0 ]; then
@@ -211,8 +211,6 @@ cleanup()
 	if [ "$BONUS_PRESENT" -eq 0 ]; then
 		printf '%s⏭ Bonus : aucun fichier *_bonus.c / *_bonus.h détecté, bonus ignorés.%s\n' \
 			"$GRAY" "$GRAY"
-		printf '%sBonus : %s%s ignorée(s).%s\n' \
-			"$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 	else
 		printf '%sBonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
 			"$GRAY" "$GREEN" "$B_OK" "$GRAY" "$RED" "$B_KO" "$GRAY" "$YEL" "$B_WARN" "$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
@@ -229,7 +227,7 @@ cleanup()
 		printf '%sRappel : la libft est autorisée, mais ce testeur ne la vérifie pas. Assure-toi qu’elle est correcte.%s\n' \
 			"$GRAY" "$GRAY"
 	fi
-	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n\n' \
+	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n' \
 		"$GRAY" "$GRAY"
 	printf '%sRappel : ce testeur ne remplace pas l’évaluation du sujet.%s\n\n' "$GRAY" "$GRAY"
 }
