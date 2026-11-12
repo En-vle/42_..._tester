@@ -42,6 +42,7 @@ DIR=$(cd "$DIR" 2>/dev/null && pwd) || {
 	printf 'Dossier introuvable : %s\n' "$DIR"
 	exit 1
 }
+SCRIPT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")
 
 # ───────────────────────────── couleurs ─────────────────────────────────────
 GREEN=$'\033[32m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRAY=$'\033[90m'
@@ -177,6 +178,10 @@ cleanup()
 			printf '%s✘ %s test(s) bonus en échec.%s\n' "$RED" "$B_KO" "$RST"
 		fi
 	fi
+	if [ "$libft_present" -eq 1 ]; then
+		printf '%sRappel : la libft est autorisée, mais ce testeur ne la vérifie pas. Assure-toi qu’elle est correcte.%s\n' \
+			"$GRAY" "$RST"
+	fi
 	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n\n' \
 		"$GRAY" "$RST"
 	printf '%sRappel : ce testeur ne remplace pas l’évaluation du sujet.%s\n\n' "$GRAY" "$RST"
@@ -217,10 +222,16 @@ else
 	ko "aucun fichier source C trouvé"
 fi
 extra_files=""
+libft_present=0
 while IFS= read -r -d '' path; do
+	[[ "$path" == "$SCRIPT_PATH" ]] && continue
 	relative=${path#"$DIR"/}
 	case "$relative" in
-		.git/*|42_printf_tester.sh|42_gnl_tester.sh|test_*.sh|*_tester.sh|libftprintf.a)
+		.git/*|libftprintf.a|42_printf_test.sh)
+			continue
+			;;
+		libft/*|libft.a)
+			libft_present=1
 			continue
 			;;
 		Makefile|README.md|*.c|*.h)
@@ -238,7 +249,7 @@ if [ -n "$extra_files" ]; then
 	warn "fichiers hors des formats autorisés par le sujet" \
 		"Autorisés : Makefile, README.md, *.h, */*.h, *.c et */*.c."$'\n'"Hors périmètre : ${extra_files%$'\n'}"
 else
-	ok "aucun fichier hors des formats autorisés (scripts de test exclus)"
+	ok "aucun fichier hors des formats autorisés (testeur courant exclu)"
 fi
 
 title "2. Vérification du prototype"
