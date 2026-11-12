@@ -140,6 +140,54 @@ if [ -f "$LIB" ]; then
 	}
 fi
 
+git_check()
+{
+	local dirty ahead up f untracked="" top tester_rel="" status_lines git_warn=0
+
+	printf '\n%s━━━ GIT (informatif) ━━━%s\n' "$CYAN" "$RST"
+	if ! command -v git >/dev/null 2>&1 \
+		|| ! git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		printf '  %sATTENTION : ce dossier n’est pas un dépôt git → rien n’a été push.%s\n' "$YEL" "$RST"
+		M_WARN=$((M_WARN + 1))
+		return
+	fi
+	top=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)
+	case "$SCRIPT_PATH" in
+		"$top"/*) tester_rel=${SCRIPT_PATH#"$top"/} ;;
+	esac
+	for f in Makefile README.md ft_printf.h ft_printf.c; do
+		[ -f "$DIR/$f" ] || continue
+		git -C "$DIR" ls-files --error-unmatch "$f" >/dev/null 2>&1 \
+			|| untracked="$untracked $f"
+	done
+	status_lines=$(git -C "$DIR" status --porcelain --untracked-files=all 2>/dev/null |
+		awk -v path="$tester_rel" 'substr($0, 4) != path')
+	dirty=$(printf '%s\n' "$status_lines" | awk 'NF { n++ } END { print n + 0 }')
+	up=$(git -C "$DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+	if [ -z "$(git -C "$DIR" log -1 --format=%h 2>/dev/null)" ]; then
+		git_warn=1
+		printf '  %sATTENTION : aucun commit → git add / commit / push pas fait.%s\n' "$YEL" "$RST"
+	elif [ -n "$untracked" ]; then
+		git_warn=1
+		printf '  %sATTENTION : fichiers non suivis par git (git add oublié ?) :%s%s\n' "$YEL" "$untracked" "$RST"
+	elif [ "$dirty" -gt 0 ]; then
+		git_warn=1
+		printf '  %sATTENTION : %s fichier(s) modifié(s) non commit → git add / commit / push pas à jour.%s\n' "$YEL" "$dirty" "$RST"
+	elif [ -z "$up" ]; then
+		git_warn=1
+		printf '  %sATTENTION : aucune branche distante configurée → git push pas fait.%s\n' "$YEL" "$RST"
+	else
+		ahead=$(git -C "$DIR" rev-list --count "$up..HEAD" 2>/dev/null)
+		if [ "${ahead:-0}" -gt 0 ]; then
+			git_warn=1
+			printf '  %sATTENTION : %s commit(s) pas encore push vers %s → git push pas fait.%s\n' "$YEL" "$ahead" "$up" "$RST"
+		else
+			printf '  %s✔ git : tout est commit et push (%s à jour, d’après la dernière info distante connue).%s\n' "$GREEN" "$up" "$RST"
+		fi
+	fi
+	[ "$git_warn" -eq 1 ] && M_WARN=$((M_WARN + 1))
+}
+
 cleanup()
 {
 	make -s -C "$DIR" clean >/dev/null 2>&1 || true
@@ -150,41 +198,40 @@ cleanup()
 		rm -f "$LIB"
 	fi
 	rm -rf "$T"
-	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$CYAN" "$RST"
-	printf 'Partie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' \
-		"$GREEN" "$M_OK" "$RST" "$RED" "$M_KO" "$RST" "$GRAY" "$M_WARN" "$RST"
-	[ "$M_SKIP" -gt 0 ] && printf '%s%s test(s) obligatoire(s) ignoré(s).%s\n' \
-		"$PURPLE" "$M_SKIP" "$RST"
+	git_check
+	printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$GRAY" "$RST"
+	printf '%sPartie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
+		"$GRAY" "$GREEN" "$M_OK" "$GRAY" "$RED" "$M_KO" "$GRAY" "$YEL" "$M_WARN" "$GRAY" "$PURPLE" "$M_SKIP" "$GRAY"
 	if [ "$M_KO" -eq 0 ]; then
 		printf '%s✔ Les vérifications obligatoires exécutées sont passées.%s\n' "$GREEN" "$RST"
 	else
 		printf '%s✘ %s vérification(s) en échec : consulte les KO ci-dessus.%s\n' \
-			"$RED" "$M_KO" "$RST"
+			"$RED" "$M_KO" "$GRAY"
 	fi
 	if [ "$BONUS_PRESENT" -eq 0 ]; then
 		printf '%s⏭ Bonus : aucun fichier *_bonus.c / *_bonus.h détecté, bonus ignorés.%s\n' \
-			"$GRAY" "$RST"
+			"$GRAY" "$GRAY"
+		printf '%sBonus : %s%s ignorée(s).%s\n' \
+			"$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 	else
-		printf 'Bonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' \
-			"$GREEN" "$B_OK" "$RST" "$RED" "$B_KO" "$RST" "$GRAY" "$B_WARN" "$RST"
-		[ "$B_SKIP" -gt 0 ] && printf '%s%s test(s) bonus ignoré(s).%s\n' \
-			"$PURPLE" "$B_SKIP" "$RST"
+		printf '%sBonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
+			"$GRAY" "$GREEN" "$B_OK" "$GRAY" "$RED" "$B_KO" "$GRAY" "$YEL" "$B_WARN" "$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 		if [ "$M_KO" -gt 0 ]; then
 			printf '%sRappel : le bonus ne sera évalué que si le mandatory est parfait.%s\n' \
-				"$GRAY" "$RST"
+				"$GRAY" "$GRAY"
 		elif [ "$B_KO" -eq 0 ]; then
 			printf '%s✔ Les tests bonus sont passés.%s\n' "$GREEN" "$RST"
 		else
-			printf '%s✘ %s test(s) bonus en échec.%s\n' "$RED" "$B_KO" "$RST"
+			printf '%s✘ %s test(s) bonus en échec.%s\n' "$RED" "$B_KO" "$GRAY"
 		fi
 	fi
 	if [ "$libft_present" -eq 1 ]; then
 		printf '%sRappel : la libft est autorisée, mais ce testeur ne la vérifie pas. Assure-toi qu’elle est correcte.%s\n' \
-			"$GRAY" "$RST"
+			"$GRAY" "$GRAY"
 	fi
 	printf '%sNettoyage : tous les fichiers .o du projet ont été supprimés.%s\n\n' \
-		"$GRAY" "$RST"
-	printf '%sRappel : ce testeur ne remplace pas l’évaluation du sujet.%s\n\n' "$GRAY" "$RST"
+		"$GRAY" "$GRAY"
+	printf '%sRappel : ce testeur ne remplace pas l’évaluation du sujet.%s\n\n' "$GRAY" "$GRAY"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -227,7 +274,7 @@ while IFS= read -r -d '' path; do
 	[[ "$path" == "$SCRIPT_PATH" ]] && continue
 	relative=${path#"$DIR"/}
 	case "$relative" in
-		.git/*|libftprintf.a|42_printf_test.sh)
+		.git/*|libftprintf.a)
 			continue
 			;;
 		libft/*|libft.a)

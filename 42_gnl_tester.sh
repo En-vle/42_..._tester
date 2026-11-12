@@ -806,6 +806,17 @@ check_files() { # $1=liste $2=m|b
 			ko "$f introuvable à la racine" "Nom exact attendu (casse, underscores, extension)${similar:+. Fichiers qui ressemblent : $similar}"
 		fi
 	done
+	if [ "$2" = m ]; then
+		local extra_scripts="" path
+		while IFS= read -r -d '' path; do
+			[ "$path" = "$TESTER_PATH" ] && continue
+			case "${path##*/}" in
+				42_*_tester.sh|test_libft.sh) continue ;;
+			esac
+			extra_scripts+="${path#"$DIR"/}"$'\n'
+		done < <(find "$DIR" -maxdepth 1 -type f -name '*.sh' -print0)
+		[ -n "$extra_scripts" ] && warn "scripts supplémentaires dans le dossier du projet" "${extra_scripts%$'\n'}"
+	fi
 	if [ "$2" = m ] && git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 		top=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)
 		[ "$top" != "$DIR" ] && warn "le dossier testé n'est pas la racine du dépôt git" "Racine git : $top — les fichiers doivent être À LA RACINE du dépôt."
@@ -878,10 +889,11 @@ mem_suite() { # $1=m|b
 # ───────────────────────────── git (informatif) ────────────────────────────
 GIT_LINES=""
 git_check() {
-	local dirty ahead up f untracked="" top tester_rel="" status_lines
-	printf '\n%s━━━ GIT (informatif, non compté dans la note) ━━━%s\n' "$CYAN" "$RST"
+	local dirty ahead up f untracked="" top tester_rel="" status_lines git_warn=0
+	printf '\n%s━━━ GIT (informatif) ━━━%s\n' "$CYAN" "$RST"
 	if ! command -v git >/dev/null 2>&1 || ! git -C "$DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 		printf '  %sATTENTION : ce dossier n'"'"'est pas un dépôt git → rien n'"'"'a été push.%s\n' "$YEL" "$RST"
+		M_WARN=$((M_WARN + 1))
 		return
 	fi
 	top=$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null)
@@ -897,21 +909,27 @@ git_check() {
 	dirty=$(printf '%s\n' "$status_lines" | awk 'NF { n++ } END { print n + 0 }')
 	up=$(git -C "$DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
 	if [ -z "$(git -C "$DIR" log -1 --format=%h 2>/dev/null)" ]; then
+		git_warn=1
 		printf '  %sATTENTION : aucun commit → git add / commit / push pas fait.%s\n' "$YEL" "$RST"
 	elif [ -n "$untracked" ]; then
+		git_warn=1
 		printf '  %sATTENTION : fichiers non suivis par git (git add oublié ?) :%s%s\n' "$YEL" "$untracked" "$RST"
 	elif [ "$dirty" -gt 0 ]; then
+		git_warn=1
 		printf '  %sATTENTION : %s fichier(s) modifié(s) non commit → git add / commit / push pas à jour.%s\n' "$YEL" "$dirty" "$RST"
 	elif [ -z "$up" ]; then
+		git_warn=1
 		printf '  %sATTENTION : aucune branche distante configurée → git push pas fait.%s\n' "$YEL" "$RST"
 	else
 		ahead=$(git -C "$DIR" rev-list --count "$up..HEAD" 2>/dev/null)
 		if [ "${ahead:-0}" -gt 0 ]; then
+			git_warn=1
 			printf '  %sATTENTION : %s commit(s) pas encore push vers %s → git push pas fait.%s\n' "$YEL" "$ahead" "$up" "$RST"
 		else
 			printf '  %s✔ git : tout est commit et push (%s à jour, d'"'"'après la dernière info distante connue).%s\n' "$GREEN" "$up" "$RST"
 		fi
 	fi
+	[ "$git_warn" -eq 1 ] && M_WARN=$((M_WARN + 1))
 }
 
 # ============================================================================
@@ -1058,8 +1076,8 @@ git_check
 
 # ───── Résumé ─────
 printf '\n%s══════════════════════ RÉSULTAT ══════════════════════%s\n' "$CYAN" "$RST"
-printf 'Partie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' "$GREEN" "$M_OK" "$RST" "$RED" "$M_KO" "$RST" "$GRAY" "$M_WARN" "$RST"
-[ "$M_SKIP" -gt 0 ] && printf '%s%s test(s) non exécuté(s) car compilation impossible.%s\n' "$PURPLE" "$M_SKIP" "$RST"
+printf '%sPartie obligatoire : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
+	"$GRAY" "$GREEN" "$M_OK" "$GRAY" "$RED" "$M_KO" "$GRAY" "$YEL" "$M_WARN" "$GRAY" "$PURPLE" "$M_SKIP" "$GRAY"
 if [ "$M_KO" -eq 0 ]; then
 	printf '%s✔ Les tests de la partie obligatoire sont tous passés.%s\n' "$GREEN" "$RST"
 	[ "$M_WARN" -gt 0 ] && printf '%s  (%s warning(s) à regarder avant de rendre)%s\n' "$GRAY" "$M_WARN" "$RST"
@@ -1067,10 +1085,11 @@ else
 	printf '%s✘ Partie obligatoire : %s test(s) en échec, corrige les KO ci-dessus.%s\n' "$RED" "$M_KO" "$RST"
 fi
 if [ "$BONUS_PRESENT" -eq 0 ]; then
-	printf '%s⏭ Bonus : non rendus, ignorés.%s\n' "$GRAY" "$RST"
+	printf '%s⏭ Bonus : non rendus, %s%s test(s) ignoré(s).%s\n' \
+		"$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 else
-	printf 'Bonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s\n' "$GREEN" "$B_OK" "$RST" "$RED" "$B_KO" "$RST" "$GRAY" "$B_WARN" "$RST"
-	[ "$B_SKIP" -gt 0 ] && printf '%s%s test(s) non exécuté(s) car compilation impossible.%s\n' "$PURPLE" "$B_SKIP" "$RST"
+	printf '%sBonus : %s%s OK%s, %s%s KO%s, %s%s warning(s)%s, %s%s ignorée(s)%s\n' \
+		"$GRAY" "$GREEN" "$B_OK" "$GRAY" "$RED" "$B_KO" "$GRAY" "$YEL" "$B_WARN" "$GRAY" "$PURPLE" "$B_SKIP" "$GRAY"
 	if [ "$B_KO" -eq 0 ]; then
 		printf '%s✔ Les tests du/des bonus sont tous passés.%s\n' "$GREEN" "$RST"
 		[ "$B_WARN" -gt 0 ] && printf '%s  (%s warning(s) à regarder)%s\n' "$GRAY" "$B_WARN" "$RST"
