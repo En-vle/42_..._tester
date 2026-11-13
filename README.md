@@ -23,6 +23,9 @@ All repositories follow this naming convention:
 ### Milestone 1
 - `42_printf_tester`
 - `42_get_next_line_tester`
+- `42_push_swap_tester` *(in progress)*
+
+### Milestone 2
 - ...
 
 ### More testers coming soon!
