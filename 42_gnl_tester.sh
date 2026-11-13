@@ -52,6 +52,7 @@ TIMEOUT_BIN=""
 command -v timeout  >/dev/null 2>&1 && TIMEOUT_BIN=timeout
 [ -z "$TIMEOUT_BIN" ] && command -v gtimeout >/dev/null 2>&1 && TIMEOUT_BIN=gtimeout
 tmo() { local t=$1; shift; if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" "$t" "$@"; else "$@"; fi; }
+tmo_hard() { local t=$1; shift; if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" --kill-after=3s "$t" "$@"; else "$@"; fi; }
 
 MEM_TOOL="none"
 if command -v valgrind >/dev/null 2>&1; then
@@ -831,9 +832,10 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 	local label=$1 len=$2 bin=$3 out rc lost reach inval where summary
 	shift 3
 	if [ "$MEM_TOOL" = valgrind ]; then
-		{ out=$(tmo 120 valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=99 "$bin" "$@" 2>&1 < "${STDIN_FILE:-/dev/null}"); rc=$?; } 2>/dev/null
+		[ "$QUIET" -eq 1 ] || printf '  %s[MEM]%s %s (limite 30 s)\n' "$GRAY" "$RST" "$label"
+		{ out=$(tmo_hard 30 valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=99 "$bin" "$@" 2>&1 < "${STDIN_FILE:-/dev/null}"); rc=$?; } 2>/dev/null
 		[ "$rc" = 1 ] && { warn "$label" "le test fonctionnel échoue : mémoire non analysée"; return; }
-		case "$rc" in 139|134|136|138|135) ko "$label" "Crash pendant l'analyse mémoire (code $rc)"; return ;; 124) warn "$label" "analyse mémoire trop lente (timeout)"; return ;; esac
+		case "$rc" in 139|134|136|138|135) ko "$label" "Crash pendant l'analyse mémoire (code $rc)"; return ;; 124|137) warn "$label" "analyse mémoire trop lente (timeout de 30 s)"; return ;; esac
 		lost=$(printf '%s\n' "$out" | grep -E '(definitely|indirectly|possibly) lost: [1-9]' | sed 's/^==[0-9]*== *//')
 		reach=$(printf '%s\n' "$out" | grep -E 'still reachable: [1-9]' | sed 's/^==[0-9]*== *//')
 		inval=$(printf '%s\n' "$out" | grep -E 'Invalid (read|write|free)|Mismatched free|uninitialised value|Conditional jump' | sed 's/^==[0-9]*== *//' | sort | uniq -c | head -n 3)
@@ -865,6 +867,11 @@ mem_suite() { # $1=m|b
 	local kind=$1 bs bin F="$T/f"
 	if [ "$MEM_TOOL" = none ]; then
 		warn "ni valgrind ni AddressSanitizer disponibles : fuites mémoire non testées" "Installe valgrind (sudo apt install valgrind) pour tester les leaks."
+		return
+	fi
+	if [ "$MEM_TOOL" = valgrind ] && [ -z "$TIMEOUT_BIN" ]; then
+		warn "analyse Valgrind ignorée : timeout/gtimeout introuvable" "Installe coreutils pour éviter qu'un test mémoire bloqué ne bloque le testeur."
+		[ "$kind" = b ] && skip_tests 18 || skip_tests 12
 		return
 	fi
 	printf '  %s(outil : %s)%s\n' "$GRAY" "$MEM_TOOL" "$RST"
@@ -946,7 +953,7 @@ header() {
 ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 ║                                                 +#+#+#+#+#+   +#+            ║
 ║    Created: 2026/11/10 12:00:00 by enviale           #+#    #+#              ║
-║    Updated: 2026/11/12 13:45:58 by enviale          ###   ########.fr        ║
+║    Updated: 2026/11/13 10:47:31 by enviale          ###   ########.fr        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 HDR
