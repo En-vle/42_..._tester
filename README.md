@@ -1,4 +1,3 @@
-
 # 42 Testers
 
 Welcome to **42 Testers**!
@@ -23,7 +22,8 @@ All repositories follow this naming convention:
 ### Milestone 1
 - `42_printf_tester`
 - `42_get_next_line_tester`
-- `42_push_swap_tester` *(in progress)*
+
+En l’absence de moulinette pour `push_swap`, aucun testeur n’est proposé : chacun doit évaluer le projet par lui-même.
 
 ### Milestone 2
 - ...
