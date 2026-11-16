@@ -22,8 +22,7 @@ All repositories follow this naming convention:
 ### Milestone 1
 - `42_printf_tester`
 - `42_get_next_line_tester`
-
-En l’absence de moulinette pour `push_swap`, aucun testeur n’est proposé : chacun doit évaluer le projet par lui-même.
+- `42_push_swap_tester` has not been created due to the absence of an evaluation by the automated grading tool.
 
 ### Milestone 2
 - ...
