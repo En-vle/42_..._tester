@@ -832,7 +832,6 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 	local label=$1 len=$2 bin=$3 out rc lost reach inval where summary
 	shift 3
 	if [ "$MEM_TOOL" = valgrind ]; then
-		[ "$QUIET" -eq 1 ] || printf '  %s[MEM]%s %s (limite 30 s)\n' "$GRAY" "$RST" "$label"
 		{ out=$(tmo_hard 30 valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=99 "$bin" "$@" 2>&1 < "${STDIN_FILE:-/dev/null}"); rc=$?; } 2>/dev/null
 		[ "$rc" = 1 ] && { warn "$label" "le test fonctionnel échoue : mémoire non analysée"; return; }
 		case "$rc" in 139|134|136|138|135) ko "$label" "Crash pendant l'analyse mémoire (code $rc)"; return ;; 124|137) warn "$label" "analyse mémoire trop lente (timeout de 30 s)"; return ;; esac
@@ -841,13 +840,13 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 		inval=$(printf '%s\n' "$out" | grep -E 'Invalid (read|write|free)|Mismatched free|uninitialised value|Conditional jump' | sed 's/^==[0-9]*== *//' | sort | uniq -c | head -n 3)
 		where=$(printf '%s\n' "$out" | grep -E '(at|by) 0x' | grep -E 'get_next_line|utils' | head -n 2 | sed 's/^==[0-9]*== *//')
 		if [ -n "$inval" ]; then
-			warn "$label : accès mémoire invalide" "$inval"$'\n'"$where"$'\n'"Ça peut passer par chance mais crashera ailleurs (autre machine/moulinette)."
+			ko "$label : accès mémoire invalide" "$inval"$'\n'"$where"$'\n'"Ça peut passer par chance mais crashera ailleurs (autre machine/moulinette)."
 		elif [ -n "$lost" ]; then
-			warn "$label : FUITE MÉMOIRE" "$lost"$'\n'"Allocation : $where"$'\n'"Les fuites ne sont pas tolérées par le sujet."
+			ko "$label : FUITE MÉMOIRE" "$lost"$'\n'"Allocation : $where"$'\n'"Les fuites ne sont pas tolérées par le sujet."
 		elif [ -n "$reach" ] && [ "$len" = 0 ]; then
-			warn "$label : mémoire non libérée en fin de fichier (still reachable)" "$reach"$'\n'"Quand EOF est atteint, libère le stash (free + remise à NULL)."$'\n'"Allocation : $where"
+			ko "$label : mémoire non libérée en fin de fichier (still reachable)" "$reach"$'\n'"Quand EOF est atteint, libère le stash (free + remise à NULL)."$'\n'"Allocation : $where"
 		else
-			test_ok
+			ok "$label"
 		fi
 	else
 		local leak=0; [ "$(uname)" = Linux ] && leak=1
@@ -856,9 +855,9 @@ mem_case() { # label lenient(0/1) bin args...  (STDIN_FILE optionnel)
 		if printf '%s\n' "$out" | grep -qE 'ERROR: (Address|Leak)Sanitizer'; then
 			summary=$(printf '%s\n' "$out" | grep -E 'SUMMARY|ERROR: (Address|Leak)Sanitizer' | head -n 3)
 			where=$(printf '%s\n' "$out" | grep -E '#[0-9]+ .*(get_next_line|utils)' | head -n 3)
-			warn "$label : problème mémoire (AddressSanitizer)" "$summary"$'\n'"$where"
+			ko "$label : problème mémoire (AddressSanitizer)" "$summary"$'\n'"$where"
 		else
-			test_ok
+			ok "$label"
 		fi
 	fi
 }
@@ -953,7 +952,7 @@ header() {
 ║    By: enviale <enviale@student.42.fr>            +#+  +:+       +#+         ║
 ║                                                 +#+#+#+#+#+   +#+            ║
 ║    Created: 2026/11/10 12:00:00 by enviale           #+#    #+#              ║
-║    Updated: 2026/11/13 10:47:31 by enviale          ###   ########.fr        ║
+║    Updated: 2026/11/17 10:52:38 by enviale          ###   ########.fr        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 HDR
